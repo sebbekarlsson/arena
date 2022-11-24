@@ -11,6 +11,10 @@ int arena_init(Arena* arena, ArenaConfig cfg) {
   if (arena->initialized) return 1;
   arena->initialized = true;
 
+  if (cfg.item_size > 0 && cfg.items_per_page > 0) {
+    cfg.page_size = cfg.item_size * cfg.items_per_page;
+  }
+
   cfg.alignment = OR(cfg.alignment, ARENA_ALIGNMENT);
   cfg.page_size = OR(cfg.page_size, ARENA_PAGE_SIZE);
   cfg.page_size = ARENA_ALIGN_UP(cfg.page_size, cfg.alignment);
@@ -140,8 +144,11 @@ static void* arena_malloc_(Arena* arena, int64_t size, ArenaRef* ref) {
 void* arena_malloc(Arena* arena, int64_t size, ArenaRef* ref) {
   if (!arena) ARENA_WARNING_RETURN(0, stderr, "arena == null.\n");
   if (!arena->initialized) ARENA_WARNING_RETURN(0, stderr, "Arena not initialized.\n");
-  if (size <= 0) ARENA_WARNING_RETURN(0, stderr, "Invalid allocation size of %ld bytes.\n", size);
   if (arena_is_broken(*arena)) ARENA_WARNING_RETURN(0, stderr, "This arena is broken.\n");
+  size = OR(size, arena->config.item_size);
+  if (size <= 0) ARENA_WARNING_RETURN(0, stderr, "Invalid allocation size of %ld bytes.\n", size);
+  if (arena->config.item_size > 0 && size != arena->config.item_size) ARENA_WARNING_RETURN(0, stderr, "size != item_size");
+
 
   Arena* last = arena;
 
@@ -168,7 +175,7 @@ void* arena_malloc(Arena* arena, int64_t size, ArenaRef* ref) {
 
     if (last->next == 0) {
       Arena* next = NEW(Arena);
-      arena_init(next, last->config);
+      arena_init(next, arena->config);
       last->next = next;
     }
     last = last->next;
@@ -183,26 +190,28 @@ void* arena_malloc(Arena* arena, int64_t size, ArenaRef* ref) {
   return data;
 }
 
-
+static void arena_iter_free(Arena* arena, void* data) {
+  if (!arena || !data) return;
+  if (!arena->config.free_function) return;
+  arena->config.free_function(data);
+}
 
 int arena_clear(Arena* arena) {
   if (!arena) return 0;
   if (!arena->initialized) ARENA_WARNING_RETURN(0, stderr, "Arena not initialized.\n");
 
-
-  if (arena->freed_memory.length > 0) {
+  if (arena->config.free_function != 0 && arena->data != 0) {
     for (int64_t i = 0; i < arena->freed_memory.length; i++) {
       ArenaRef range = arena->freed_memory.items[i];
 
       void* data = arena->data + range.data_start;
 
-      if (arena->config.free_function != 0) {
-        arena->config.free_function(data);
-      }
-
+      arena->config.free_function(data);
+      arena->size -= arena->config.item_size;
     }
-    arena_ArenaRef_buffer_clear(&arena->freed_memory);
   }
+
+  arena_ArenaRef_buffer_clear(&arena->freed_memory);
 
   if (arena->data != 0) {
     free(arena->data);
@@ -215,31 +224,77 @@ int arena_clear(Arena* arena) {
   return 1;
 }
 
-int arena_destroy(Arena* arena) {
+static int arena_destroy_private(Arena* arena, bool should_free) {
   if (!arena) return 0;
   if (!arena->initialized) ARENA_WARNING_RETURN(0, stderr, "Arena not initialized.\n");
+
+ // arena_iter(arena, arena, (ArenaIterFunction)arena_iter_free);
 
   arena_clear(arena);
 
   if (arena->next != 0) {
-    Arena* next = arena->next;
-    while (next != 0) {
-      arena_clear(next);
-
-      Arena* prev = next;
-      next = prev->next;
-
-      free(prev);
-      prev = 0;
-    }
+    arena_destroy_private(arena->next, true);
+    arena->next = 0;
   }
 
-  arena->next = 0;
+  if (should_free) {
+    free(arena);
+    arena = 0;
+  }
+
 
   return 1;
+}
+
+int arena_destroy(Arena* arena) {
+  if (!arena) return 0;
+  if (!arena->initialized) ARENA_WARNING_RETURN(0, stderr, "Arena not initialized.\n");
+
+  return arena_destroy_private(arena, false);
 }
 
 bool arena_is_broken(Arena arena) {
   if (!arena.initialized) return false;
   return arena.broken;
+}
+
+int arena_iter(Arena* arena, void* user_ptr, ArenaIterFunction iter_function) {
+  if (!arena) return 0;
+  if (!arena->initialized) ARENA_WARNING_RETURN(0, stderr, "Arena not initialized.\n");
+  if (arena->config.item_size <= 0 || arena->config.items_per_page <= 0) ARENA_WARNING_RETURN(0, stderr, "This arena cannot be iterated over.\n");
+  if (!iter_function) ARENA_WARNING_RETURN(0, stderr, "No iter function specified.\n");
+  if (!arena->data) return 0;
+  if (!arena->current) return 0;
+
+  int64_t count = arena->current / arena->config.item_size;
+
+  if (count <= 0) return 0;
+
+  int ok = 1;
+
+  for (int64_t i = 0; i < count; i++) {
+    int64_t data_start = i * arena->config.item_size;
+
+    ok = 1;
+
+    for (int64_t j = 0; j < arena->freed_memory.length; j++) {
+      ArenaRef ref = arena->freed_memory.items[j];
+      if (ref.arena == 0 || ref.arena != arena) continue;
+
+      if (ref.data_start == data_start) {
+        ok = 0;
+        break;
+      }
+    }
+
+    if (!ok) continue;
+
+    iter_function(user_ptr, arena->data + data_start);
+  }
+
+  if (arena->next != 0) {
+    ok = arena_iter(arena->next, user_ptr, iter_function) || ok;
+  }
+
+  return ok;
 }

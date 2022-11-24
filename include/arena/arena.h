@@ -50,4 +50,6 @@ int arena_destroy(Arena* arena);
 
 bool arena_is_broken(Arena arena);
 
+int arena_iter(Arena* arena, void* user_ptr, ArenaIterFunction iter_function);
+
 #endif
