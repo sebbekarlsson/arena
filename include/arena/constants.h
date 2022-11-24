@@ -1,0 +1,7 @@
+#ifndef ARENA_CONSTANTS_H
+#define ARENA_CONSTANTS_H
+
+#define ARENA_PAGE_SIZE 2048
+#define ARENA_ALIGNMENT 4
+
+#endif
