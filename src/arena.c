@@ -104,16 +104,20 @@ static ArenaRef *arena_malloc_(Arena *arena) {
     arena->size = data_size;
   }
 
-  if (!arena->refs) {
-    arena->refs =
-        (ArenaRef *)calloc(arena->config.items_per_page, sizeof(ArenaRef));
-  }
+  arena->size = MAX(arena->size, data_size);
 
   if (!arena->data) {
     arena->broken = true;
     ARENA_WARNING_RETURN(0, stderr,
                          "Arena has failed to allocate more memory.\n");
   }
+
+  if (!arena->refs) {
+    arena->refs =
+        (ArenaRef *)calloc(arena->config.items_per_page, sizeof(ArenaRef));
+  }
+
+
 
   if (arena->malloc_length >= arena->config.items_per_page) {
     goto find_free_ref;
@@ -368,6 +372,34 @@ int arena_reset(Arena* arena) {
   arena->pages = 0;
   arena->broken = false;
   arena->size = 0;
+
+
+  if (arena->refs != 0) {
+    for (int64_t i = 0; i < arena->config.items_per_page; i++) {
+      ArenaRef *ref = &arena->refs[i];
+//      if (ref->in_use || ref->ptr == 0)
+  //      continue;
+
+      if (ref->arena != 0 && ref->ptr != 0 && ref->data_size > 0) {
+        if (arena->config.free_function) {
+          arena->config.free_function(ref->ptr);
+        }
+      }
+
+      ref->in_use = false;
+      ref->ptr = 0;
+      ref->arena = 0;
+      ref->data_size = 0;
+      ref->data_start = 0;
+      ref->page = 0;
+      arena->free_length = MAX(0, arena->free_length - 1);
+    }
+
+//    free(arena->refs);
+ //   arena->refs = 0;
+  }
+
+  //arena->last_free_ref = 0;
 
   if (arena->next != 0 ) {
     arena_reset(arena->next);

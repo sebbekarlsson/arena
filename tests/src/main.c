@@ -190,6 +190,7 @@ void test_arena_randomly_reset(int64_t count, int64_t items_per_page) {
   arena_Person_list_clear(&people);
 
   arena_reset(&arena);
+//  arena_destroy(&arena);
 
   ARENA_ASSERT(arena.pages == 0);
   ARENA_ASSERT(arena.data != 0);
