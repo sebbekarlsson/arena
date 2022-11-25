@@ -19,6 +19,11 @@ add_library(arena_static STATIC ${arena_files})
 target_compile_options(arena PUBLIC -fPIC)
 target_compile_options(arena_static PUBLIC -fPIC)
 
+
+# Debug
+# target_compile_options(arena PUBLIC -fPIC -g -Wall)
+# target_compile_options(arena_static PUBLIC -fPIC -g -Wall)
+
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 target_include_directories(

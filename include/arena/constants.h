@@ -2,6 +2,7 @@
 #define ARENA_CONSTANTS_H
 
 #define ARENA_PAGE_SIZE 2048
+#define ARENA_ITEMS_PER_PAGE 16
 #define ARENA_ALIGNMENT 4
 
 #endif

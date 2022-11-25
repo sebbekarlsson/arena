@@ -20,23 +20,35 @@ void free_person(Person* person) {
 int main(int argc, char* argv[]) {
 
   Arena arena = {0};
-  arena_init(&arena, (ArenaConfig){ .page_size = 0, .free_function = (ArenaFreeFunction)free_person });
+  arena_init(&arena, (ArenaConfig){ .item_size = sizeof(Person), .items_per_page = 4, .free_function = (ArenaFreeFunction)free_person });
 
+  int64_t nr_people = 100;
 
-  for (int i = 0; i < 10000; i++) {
+  for (int i = 0; i < nr_people; i++) {
 
     bool alt = i % 2 == 0;
 
     ArenaRef ref = {0};
-    Person* p = arena_malloc(&arena, sizeof(Person), &ref);
+    Person* p = arena_malloc(&arena, &ref);
 
 
     p->age = i;
     p->name = strdup(alt ? "Sarah": "John");
 
-    arena_free(&arena, ref);
+   // arena_free(ref);
 
   }
+
+  ArenaIterator it = {0};
+  int64_t count = 0;
+  while (arena_iterate(&arena, &it)) {
+    Person* p = (Person*)it.ref.ptr;
+    printf("in_use: %d\n", it.ref.in_use);
+    printf("%p, %ld, %s\n", it.ref.ptr, it.ref.id, p->name);;
+    count++;
+  }
+
+  printf("%ld\n", count);
 
   arena_destroy(&arena);
 

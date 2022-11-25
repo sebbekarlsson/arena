@@ -6,20 +6,37 @@
 
 ARENA_IMPLEMENT_BUFFER(ArenaRef);
 
-int arena_init(Arena* arena, ArenaConfig cfg) {
-  if (!arena) return 0;
-  if (arena->initialized) return 1;
-  arena->initialized = true;
+static bool arena_ref_can_be_used(ArenaRef ref) {
+  return ref.in_use == false && ref.ptr != 0 && ref.arena != 0 &&
+         ref.data_size > 0;
+}
 
-  if (cfg.item_size > 0 && cfg.items_per_page > 0) {
-    cfg.page_size = cfg.item_size * cfg.items_per_page;
+int arena_init(Arena *arena, ArenaConfig cfg) {
+  if (!arena)
+    return 0;
+  if (arena->initialized)
+    return 1;
+
+  cfg.items_per_page = OR(cfg.items_per_page, ARENA_ITEMS_PER_PAGE);
+
+  if (!cfg.item_size) {
+    ARENA_WARNING_RETURN(0, stderr, "No item_size provided.\n");
   }
 
+  arena->initialized = true;
+
   cfg.alignment = OR(cfg.alignment, ARENA_ALIGNMENT);
-  cfg.page_size = OR(cfg.page_size, ARENA_PAGE_SIZE);
-  cfg.page_size = ARENA_ALIGN_UP(cfg.page_size, cfg.alignment);
-  arena_ArenaRef_buffer_init(&arena->freed_memory);
-  arena->config = cfg;
+
+  arena->page_size = cfg.item_size * cfg.items_per_page;
+  arena->page_size = ARENA_ALIGN_UP(arena->page_size, cfg.alignment);
+
+  arena->refs = 0;
+  arena->last_free_ref = 0;
+  arena->malloc_length = 0;
+  arena->free_length = 0;
+
+  // cfg.page_size = OR(cfg.page_size, ARENA_PAGE_SIZE);
+  //  cfg.page_size = ARENA_ALIGN_UP(cfg.page_size, cfg.alignment);
 
   if (!ARENA_IS_POWER_OF_2(cfg.alignment)) {
     ARENA_WARNING(stderr, "alignment is not power of 2!\n");
@@ -27,6 +44,7 @@ int arena_init(Arena* arena, ArenaConfig cfg) {
     return 0;
   }
 
+  arena->config = cfg;
   arena->next = 0;
   arena->data = 0;
   arena->current = 0;
@@ -36,193 +54,226 @@ int arena_init(Arena* arena, ArenaConfig cfg) {
   return 1;
 }
 
-int arena_free(Arena* arena, ArenaRef ref) {
-  if (!arena) return 0;
-  if (!arena->initialized) ARENA_WARNING_RETURN(0, stderr, "Arena not initialized.\n");
-  if (arena_is_broken(*arena)) ARENA_WARNING_RETURN(0, stderr, "This arena is broken.\n");
-  if (ref.data_size <= 0) ARENA_WARNING_RETURN(0, stderr, "Reference has no size.\n");
+int arena_free(ArenaRef ref) {
 
+  Arena *arena = ref.arena;
 
+  if (!arena)
+    return 0;
+  if (!arena->initialized)
+    ARENA_WARNING_RETURN(0, stderr, "Arena not initialized.\n");
+  if (arena_is_broken(*arena))
+    ARENA_WARNING_RETURN(0, stderr, "This arena is broken.\n");
 
-  if (ref.arena == 0) {
-    int64_t id = 0;
+  if (arena->refs == 0)
+    ARENA_WARNING_RETURN(0, stderr, "refs == null.\n");
 
-    Arena* page = arena;
+  if (ref.id >= arena->config.items_per_page || ref.id <= -1)
+    ARENA_WARNING_RETURN(0, stderr, "ref.id is invalid.\n");
 
-    if (ref.page != 0) {
-      while (page != 0) {
-        page = arena->next;
+  ArenaRef *private_ref = &arena->refs[ref.id];
+  private_ref->in_use = false;
+  arena->last_free_ref = private_ref;
+  arena->free_length++;
 
-        if (id >= ref.page) break;
-
-        id++;
-      }
-    }
-    ref.arena = page;
-  }
-
-
-
-
-  if (!ref.arena) ARENA_WARNING_RETURN(0, stderr, "Could not find page.\n");
-  if (!ref.arena->data || ref.arena->size <= 0) ARENA_WARNING_RETURN(0, stderr, "Arena page has no data.\n");
-
-
-  arena_ArenaRef_buffer_push(&ref.arena->freed_memory, ref);
+  // arena_ArenaRef_buffer_push(&ref.arena->freed_memory, ref);
   return 1;
 }
 
-static void* arena_malloc_(Arena* arena, int64_t size, ArenaRef* ref) {
-  if (!arena) ARENA_WARNING_RETURN(0, stderr, "arena == null.\n");
-  if (!arena->initialized) ARENA_WARNING_RETURN(0, stderr, "Arena not initialized.\n");
-  if (size <= 0) ARENA_WARNING_RETURN(0, stderr, "Invalid allocation size of %ld bytes.\n", size);
-  if (arena_is_broken(*arena)) ARENA_WARNING_RETURN(0, stderr, "This arena is broken.\n");
+static ArenaRef *arena_malloc_(Arena *arena) {
+  if (!arena)
+    ARENA_WARNING_RETURN(0, stderr, "arena == null.\n");
+  if (!arena->initialized)
+    ARENA_WARNING_RETURN(0, stderr, "Arena not initialized.\n");
 
-  //int64_t og_size = size;
+  int64_t size = arena->config.item_size;
+
+  if (size <= 0)
+    ARENA_WARNING_RETURN(0, stderr, "Invalid allocation size of %ld bytes.\n",
+                         size);
+  if (arena_is_broken(*arena))
+    ARENA_WARNING_RETURN(0, stderr, "This arena is broken.\n");
+
+  // int64_t og_size = size;
   size = ARENA_ALIGN_UP(size, arena->config.alignment);
 
-  int64_t data_size = size > arena->config.page_size ? size : arena->config.page_size;
-
+  int64_t data_size = size > arena->page_size ? size : arena->page_size;
 
   if (!arena->data) {
     arena->data = calloc(1, data_size);
     arena->size = data_size;
   }
 
-  if (!arena->data) {
-    arena->broken = true;
-    ARENA_WARNING_RETURN(0, stderr, "Arena has failed to allocate more memory.\n");
+  if (!arena->refs) {
+    arena->refs =
+        (ArenaRef *)calloc(arena->config.items_per_page, sizeof(ArenaRef));
   }
 
+  if (!arena->data) {
+    arena->broken = true;
+    ARENA_WARNING_RETURN(0, stderr,
+                         "Arena has failed to allocate more memory.\n");
+  }
+
+  if (arena->malloc_length >= arena->config.items_per_page) {
+    goto find_free_ref;
+  }
+
+  int64_t id =
+      arena->malloc_length; // arena->current / arena->config.items_per_page;
+  ArenaRef *ref = &arena->refs[id];
+
+  if (ref->ptr != 0 && ref->in_use) {
+    goto find_free_ref;
+  }
 
   int64_t avail = arena->size - arena->current;
-
 
   if (avail >= size) {
     int64_t data_start = arena->current;
 
     arena->current += size;
+    arena->malloc_length++;
 
-    if (ref != 0) {
-      ref->data_size = size;
-      ref->data_start = data_start;
-      ref->arena = arena;
-    }
+    ref->data_size = size;
+    ref->data_start = data_start;
+    ref->arena = arena;
+    ref->id = id;
 
-    return arena->data + data_start;
+    ref->ptr = arena->data + data_start;
+    ref->arena = arena;
+    ref->in_use = true;
+    return ref;
   }
 
+find_free_ref:
+  if (arena->last_free_ref != 0 &&
+      arena_ref_can_be_used(*arena->last_free_ref)) {
+    ref = arena->last_free_ref;
+    if (arena->config.free_function) {
+      arena->config.free_function(ref->ptr);
+    }
+    ref->in_use = true;
+    arena->free_length = MAX(0, arena->free_length - 1);
+    arena->last_free_ref = 0;
+    return ref;
+  }
 
-  if (arena->freed_memory.length > 0) {
-    for (int64_t i = 0; i < arena->freed_memory.length; i++) {
-      ArenaRef range = arena->freed_memory.items[i];
+  if (arena->free_length > 0) {
+    for (int64_t i = 0; i < arena->config.items_per_page; i++) {
+      ref = &arena->refs[i];
+      if (!arena_ref_can_be_used(*ref))
+        continue;
 
-
-      if (range.data_size >= size) {
-        if (ref != 0) {
-          ref->data_size = size;
-          ref->data_start = range.data_start;
-        }
-
-        void* data = arena->data + range.data_start;
-
-        if (arena->config.free_function != 0) {
-          arena->config.free_function(data);
-        }
-
-        arena_ArenaRef_buffer_remove(&arena->freed_memory, i);
-
-        return data;
+      if (arena->config.free_function) {
+        arena->config.free_function(ref->ptr);
       }
+
+      ref->in_use = true;
+      arena->free_length = MAX(0, arena->free_length - 1);
+      return ref;
     }
   }
 
   return 0;
 }
 
+void *arena_malloc(Arena *arena, ArenaRef *user_ref) {
+  if (!arena)
+    ARENA_WARNING_RETURN(0, stderr, "arena == null.\n");
+  if (!arena->initialized)
+    ARENA_WARNING_RETURN(0, stderr, "Arena not initialized.\n");
+  if (arena_is_broken(*arena))
+    ARENA_WARNING_RETURN(0, stderr, "This arena is broken.\n");
 
-void* arena_malloc(Arena* arena, int64_t size, ArenaRef* ref) {
-  if (!arena) ARENA_WARNING_RETURN(0, stderr, "arena == null.\n");
-  if (!arena->initialized) ARENA_WARNING_RETURN(0, stderr, "Arena not initialized.\n");
-  if (arena_is_broken(*arena)) ARENA_WARNING_RETURN(0, stderr, "This arena is broken.\n");
-  size = OR(size, arena->config.item_size);
-  if (size <= 0) ARENA_WARNING_RETURN(0, stderr, "Invalid allocation size of %ld bytes.\n", size);
-  if (arena->config.item_size > 0 && size != arena->config.item_size) ARENA_WARNING_RETURN(0, stderr, "size != item_size");
+  int64_t size = arena->config.item_size;
 
+  if (size <= 0)
+    ARENA_WARNING_RETURN(0, stderr, "Invalid allocation size of %ld bytes.\n",
+                         size);
+  if (arena->config.item_size > 0 && size != arena->config.item_size)
+    ARENA_WARNING_RETURN(0, stderr, "size != item_size");
 
-  Arena* last = arena;
+  Arena *last = arena;
 
-  void* data = 0;
+  ArenaRef *ref = 0;
 
-  if (ref != 0) {
-    ref->page = 0;
-    ref->data_start = 0;
-    ref->data_size = 0;
-    ref->arena = last;
-  }
+  user_ref->page = 0;
+  int64_t page = 0;
 
   while (last != 0 && last->broken == false) {
-    data = arena_malloc_(last, size, ref);
+    ref = arena_malloc_(last);
 
-    if (data != 0) {
-      ref->arena = last;
-      return data;
-    }
-
-    if (ref != 0) {
-      ref->page++;
+    if (ref != 0 && ref->ptr != 0 && ref->arena != 0) {
+      *user_ref = *ref;
+      user_ref->page = page;
+      return ref->ptr;
     }
 
     if (last->next == 0) {
-      Arena* next = NEW(Arena);
+      Arena *next = NEW(Arena);
       arena_init(next, arena->config);
       last->next = next;
+      arena->pages++;
     }
     last = last->next;
+    page++;
   }
 
-
-
-  if (data == 0) {
-    ARENA_WARNING_RETURN(0, stderr, "Failed to allocate memory.\n");
-  }
-
-  return data;
+  ARENA_WARNING_RETURN(0, stderr, "Failed to allocate memory.\n");
 }
 
-int arena_clear(Arena* arena) {
-  if (!arena) return 0;
-  if (!arena->initialized) ARENA_WARNING_RETURN(0, stderr, "Arena not initialized.\n");
+int arena_clear(Arena *arena) {
+  if (!arena)
+    return 0;
+  if (!arena->initialized)
+    ARENA_WARNING_RETURN(0, stderr, "Arena not initialized.\n");
 
-  if (arena->config.free_function != 0 && arena->data != 0) {
-    for (int64_t i = 0; i < arena->freed_memory.length; i++) {
-      ArenaRef range = arena->freed_memory.items[i];
+  if (arena->refs != 0) {
+    for (int64_t i = 0; i < arena->config.items_per_page; i++) {
+      ArenaRef *ref = &arena->refs[i];
+      if (ref->in_use || ref->ptr == 0)
+        continue;
 
-      void* data = arena->data + range.data_start;
+      if (arena->config.free_function) {
+        arena->config.free_function(ref->ptr);
+      }
 
-      arena->config.free_function(data);
-      arena->size -= arena->config.item_size;
+      ref->in_use = false;
+      ref->ptr = 0;
+      ref->arena = 0;
+      ref->data_size = 0;
+      ref->data_start = 0;
+      ref->page = 0;
+      arena->free_length = MAX(0, arena->free_length - 1);
     }
+
+    free(arena->refs);
+    arena->refs = 0;
   }
 
-  arena_ArenaRef_buffer_clear(&arena->freed_memory);
+  // arena_ArenaRef_buffer_clear(&arena->freed_memory);
 
   if (arena->data != 0) {
     free(arena->data);
     arena->data = 0;
   }
 
+  arena->malloc_length = 0;
+  arena->free_length = 0;
+
   arena->size = 0;
   arena->current = 0;
   arena->broken = false;
+  arena->pages = 0;
   return 1;
 }
 
-static int arena_destroy_private(Arena* arena, bool should_free) {
-  if (!arena) return 0;
-  if (!arena->initialized) ARENA_WARNING_RETURN(0, stderr, "Arena not initialized.\n");
-
- // arena_iter(arena, arena, (ArenaIterFunction)arena_iter_free);
+static int arena_destroy_private(Arena *arena, bool should_free) {
+  if (!arena)
+    return 0;
+  if (!arena->initialized)
+    ARENA_WARNING_RETURN(0, stderr, "Arena not initialized.\n");
 
   arena_clear(arena);
 
@@ -236,136 +287,63 @@ static int arena_destroy_private(Arena* arena, bool should_free) {
     arena = 0;
   }
 
-
   return 1;
 }
 
-int arena_destroy(Arena* arena) {
-  if (!arena) return 0;
-  if (!arena->initialized) ARENA_WARNING_RETURN(0, stderr, "Arena not initialized.\n");
+int arena_destroy(Arena *arena) {
+  if (!arena)
+    return 0;
+  if (!arena->initialized)
+    ARENA_WARNING_RETURN(0, stderr, "Arena not initialized.\n");
 
   return arena_destroy_private(arena, false);
 }
 
 bool arena_is_broken(Arena arena) {
-  if (!arena.initialized) return false;
+  if (!arena.initialized)
+    return false;
   return arena.broken;
 }
 
-void* arena_iter(Arena* arena, ArenaIterator* it) {
-  if (!it) ARENA_WARNING_RETURN(0, stderr, "No iterator given.\n");
+int arena_iterate(Arena *arena, ArenaIterator *it) {
+  if (!arena || !it)
+    return 0;
 
-  if (it->arena != 0) arena = it->arena;
+find_arena:
 
-  if (!arena) return 0;
-  //if (!arena->initialized) ARENA_WARNING_RETURN(0, stderr, "Arena not initialized.\n");
-  if (arena->config.item_size <= 0 || arena->config.items_per_page <= 0) ARENA_WARNING_RETURN(0, stderr, "This arena cannot be iterated over.\n");
-  if (!arena->data) goto no_more;
-  if (!arena->current) goto no_more;
-
-
-  int64_t count = arena->current / arena->config.item_size;
-
-
-
-  if (count <= 0) {
-    goto no_more;
-  }
-
-
-  if (it->arena != 0 && it->arena != arena) {
-    return arena_iter(it->arena, it);
-  }
-
-    // we can quickly access the next data if possible
-  if (
-    !(it->ptr == arena->data + (arena->size - arena->config.item_size)) &&
-    arena->freed_memory.length <= 0 &&
-    it->i < count
-  ) {
-    it->ptr = arena->data + (it->i * arena->config.item_size);
-    it->i++;
-    it->arena = arena;
-    return it->ptr;
-  }
-
-  void* next_ptr = 0;
-
-  for (int64_t i = it->i; i < count; i++) {
-    int64_t data_start = i * arena->config.item_size;
-    next_ptr = arena->data + data_start;
-    if (next_ptr == it->ptr) continue;
-
-    bool ok = true;
-
-    for (int64_t j = 0; j < arena->freed_memory.length; j++) {
-      ArenaRef ref = arena->freed_memory.items[j];
-      if (ref.arena == 0 || ref.arena != arena) continue;
-
-      if (ref.data_start == data_start) {
-        ok = false;
-        break;
-      }
+  if (it->ref.id >= arena->malloc_length) {
+    if (it->arena != 0 && it->arena->next != 0) {
+      it->arena = it->arena->next;
+    } else {
+      return 0;
     }
+  }
 
-    if (!ok) continue;
+  if (it->arena != 0) {
+    arena = it->arena;
+  }
 
+  int64_t id = it->ref.id;
+  void *ptr = it->ref.ptr;
 
+  for (int64_t i = id; i < arena->malloc_length; i++) {
+    ArenaRef ref = arena->refs[i];
+    if (!ref.ptr || ref.ptr == ptr)
+      continue;
 
-    it->ptr = next_ptr;
-    it->i = i;
+    it->ref = ref;
+    it->ref.id = i;
     it->arena = arena;
-    return it->ptr;
+    break;
   }
 
-no_more:
-  it->ptr = 0;
-  it->i = 0;
-  it->arena = 0;
+  bool found = it->ref.ptr != 0 && it->ref.ptr != ptr;
 
-  if (arena->next != 0) {
-    return arena_iter(arena->next, it);
+  if (!found && arena->next != 0) {
+    it->ref.id = 0;
+    it->arena = arena->next;
+    goto find_arena;
   }
 
-  return it->ptr;
-}
-int arena_iter_old(Arena* arena, void* user_ptr, ArenaIterFunction iter_function) {
-  if (!arena) return 0;
-  if (!arena->initialized) ARENA_WARNING_RETURN(0, stderr, "Arena not initialized.\n");
-  if (arena->config.item_size <= 0 || arena->config.items_per_page <= 0) ARENA_WARNING_RETURN(0, stderr, "This arena cannot be iterated over.\n");
-  if (!iter_function) ARENA_WARNING_RETURN(0, stderr, "No iter function specified.\n");
-  if (!arena->data) return 0;
-  if (!arena->current) return 0;
-
-  int64_t count = arena->current / arena->config.item_size;
-
-  if (count <= 0) return 0;
-
-  int ok = 1;
-
-  for (int64_t i = 0; i < count; i++) {
-    int64_t data_start = i * arena->config.item_size;
-
-    ok = 1;
-
-    for (int64_t j = 0; j < arena->freed_memory.length; j++) {
-      ArenaRef ref = arena->freed_memory.items[j];
-      if (ref.arena == 0 || ref.arena != arena) continue;
-
-      if (ref.data_start == data_start) {
-        ok = 0;
-        break;
-      }
-    }
-
-    if (!ok) continue;
-
-    iter_function(user_ptr, arena->data + data_start);
-  }
-
-  if (arena->next != 0) {
-    ok = arena_iter_old(arena->next, user_ptr, iter_function) || ok;
-  }
-
-  return ok;
+  return found ? 1 : 0;
 }

@@ -8,7 +8,7 @@ file(GLOB sources ${CMAKE_CURRENT_SOURCE_DIR}/src/*.c)
 
 add_executable(arena_test ${sources})
 
-target_compile_options(arena_test PUBLIC -fPIC -g -Wall)
+target_compile_options(arena_test PRIVATE -fPIC -g -Wall)
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../include)
