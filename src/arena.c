@@ -123,8 +123,10 @@ static ArenaRef *arena_malloc_(Arena *arena) {
       arena->malloc_length; // arena->current / arena->config.items_per_page;
   ArenaRef *ref = &arena->refs[id];
 
-  if (ref->ptr != 0 && ref->in_use) {
-    goto find_free_ref;
+  if (arena->malloc_length > 0) {
+    if (ref->ptr != 0 && ref->in_use) {
+      goto find_free_ref;
+    }
   }
 
   int64_t avail = arena->size - arena->current;
@@ -346,4 +348,30 @@ find_arena:
   }
 
   return found ? 1 : 0;
+}
+
+int64_t arena_get_allocation_count(Arena arena) {
+  if (!arena.initialized) return 0;
+  if (arena.data == 0) return 0;
+  return arena.malloc_length;
+}
+
+int arena_reset(Arena* arena) {
+  if (!arena) return 0;
+
+  if (!arena->initialized)
+    ARENA_WARNING_RETURN(0, stderr, "Arena not initialized.\n");
+
+  arena->current = 0;
+  arena->malloc_length = 0;
+  arena->free_length = 0;
+  arena->pages = 0;
+  arena->broken = false;
+  arena->size = 0;
+
+  if (arena->next != 0 ) {
+    arena_reset(arena->next);
+  }
+
+  return 1;
 }

@@ -70,5 +70,8 @@ typedef struct {
 
 int arena_iterate(Arena* arena, ArenaIterator* it);
 
+int64_t arena_get_allocation_count(Arena arena);
+
+int arena_reset(Arena* arena);
 
 #endif
