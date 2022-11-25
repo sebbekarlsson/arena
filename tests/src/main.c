@@ -147,11 +147,11 @@ void test_iter_arena_function(void* user_ptr, Person* person) {
   ARENA_ASSERT(strcmp(person->name,  "John") == 0);
 }
 
-void test_arena_iter_items_before_free(int64_t nr_items) {
+void test_arena_iter_items_before_free(int64_t nr_items, int64_t items_per_page) {
   Arena arena = {0};
   arena_init(&arena, (ArenaConfig){
     .item_size = sizeof(Person),
-    .items_per_page = 32,
+    .items_per_page = items_per_page,
     .free_function = (ArenaFreeFunction)person_free
   });
 
@@ -168,7 +168,8 @@ void test_arena_iter_items_before_free(int64_t nr_items) {
     ARENA_ASSERT(ref.arena != 0);
     ARENA_ASSERT(ref.data_size > 0);
 
-    p->name = strdup("John");
+    p->name = strdup(i % 2 == 0 ? "Sarah" : "John");
+
 
     if (prev != 0) {
       ARENA_ASSERT(prev->name != 0);
@@ -179,7 +180,20 @@ void test_arena_iter_items_before_free(int64_t nr_items) {
     prev = p;
   }
 
-  ARENA_ASSERT(arena_iter(&arena, 0, (ArenaIterFunction)test_iter_arena_function) == 1);
+ // ARENA_ASSERT(arena_iter(&arena, 0, (ArenaIterFunction)test_iter_arena_function) == 1);
+
+    Person* p = 0;
+  ArenaIterator it = {0};
+
+  int64_t loops = 0;
+  while ((p = arena_iter(&arena, &it)) != 0) {
+    ARENA_ASSERT(p != 0);
+    ARENA_ASSERT(p->name != 0);
+    ARENA_ASSERT(strcmp(p->name, loops % 2 == 0 ? "Sarah" : "John") == 0);
+    loops++;
+  }
+
+  ARENA_ASSERT(loops == people.length);
 
 
   for (int64_t i = 0; i < people.length; i++) {
@@ -190,16 +204,18 @@ void test_arena_iter_items_before_free(int64_t nr_items) {
   arena_destroy(&arena);
   ARENA_ASSERT(arena.next == 0);
 
-  ARENA_ASSERT(arena_iter(&arena, 0, (ArenaIterFunction)test_iter_arena_function) == 0);
+
+
+//  ARENA_ASSERT(arena_iter(&arena, 0, (ArenaIterFunction)test_iter_arena_function) == 0);
 
   arena_Person_list_clear(&people);
 }
 
-void test_arena_iter_items_after_free(int64_t nr_items) {
+void test_arena_iter_items_after_free(int64_t nr_items, int64_t items_per_page) {
   Arena arena = {0};
   arena_init(&arena, (ArenaConfig){
     .item_size = sizeof(Person),
-    .items_per_page = 32,
+    .items_per_page = items_per_page,
     .free_function = (ArenaFreeFunction)person_free
   });
 
@@ -223,7 +239,20 @@ void test_arena_iter_items_after_free(int64_t nr_items) {
     prev = p;
   }
 
-  ARENA_ASSERT(arena_iter(&arena, 0, (ArenaIterFunction)test_iter_arena_function) == 0);
+  Person* p = 0;
+  ArenaIterator it = {0};
+
+  int64_t loops = 0;
+  while ((p = arena_iter(&arena, &it)) != 0) {
+    ARENA_ASSERT(p != 0);
+    ARENA_ASSERT(p->name != 0);
+    printf("%s\n", p->name);
+    loops++;
+  }
+
+  ARENA_ASSERT(loops == 0);
+
+ // ARENA_ASSERT(arena_iter(&arena, 0, (ArenaIterFunction)test_iter_arena_function) == 0);
 
   arena_destroy(&arena);
 
@@ -237,9 +266,10 @@ int main(int argc, char* argv[]) {
   test_arena_various_page_size(1000, 256);
   test_arena_randomly_free(1000, 16);
   test_arena_randomly_free(1000, 256);
-
-  test_arena_iter_items_before_free(100);
-  test_arena_iter_items_after_free(100);
+  test_arena_iter_items_before_free(100, 5);
+  test_arena_iter_items_after_free(100, 5);
+  test_arena_iter_items_before_free(1000, 8);
+  test_arena_iter_items_after_free(1000, 8);
 
   return 0;
 }

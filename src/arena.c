@@ -190,12 +190,6 @@ void* arena_malloc(Arena* arena, int64_t size, ArenaRef* ref) {
   return data;
 }
 
-static void arena_iter_free(Arena* arena, void* data) {
-  if (!arena || !data) return;
-  if (!arena->config.free_function) return;
-  arena->config.free_function(data);
-}
-
 int arena_clear(Arena* arena) {
   if (!arena) return 0;
   if (!arena->initialized) ARENA_WARNING_RETURN(0, stderr, "Arena not initialized.\n");
@@ -258,7 +252,84 @@ bool arena_is_broken(Arena arena) {
   return arena.broken;
 }
 
-int arena_iter(Arena* arena, void* user_ptr, ArenaIterFunction iter_function) {
+void* arena_iter(Arena* arena, ArenaIterator* it) {
+  if (!it) ARENA_WARNING_RETURN(0, stderr, "No iterator given.\n");
+
+  if (it->arena != 0) arena = it->arena;
+
+  if (!arena) return 0;
+  //if (!arena->initialized) ARENA_WARNING_RETURN(0, stderr, "Arena not initialized.\n");
+  if (arena->config.item_size <= 0 || arena->config.items_per_page <= 0) ARENA_WARNING_RETURN(0, stderr, "This arena cannot be iterated over.\n");
+  if (!arena->data) goto no_more;
+  if (!arena->current) goto no_more;
+
+
+  int64_t count = arena->current / arena->config.item_size;
+
+
+
+  if (count <= 0) {
+    goto no_more;
+  }
+
+
+  if (it->arena != 0 && it->arena != arena) {
+    return arena_iter(it->arena, it);
+  }
+
+    // we can quickly access the next data if possible
+  if (
+    !(it->ptr == arena->data + (arena->size - arena->config.item_size)) &&
+    arena->freed_memory.length <= 0 &&
+    it->i < count
+  ) {
+    it->ptr = arena->data + (it->i * arena->config.item_size);
+    it->i++;
+    it->arena = arena;
+    return it->ptr;
+  }
+
+  void* next_ptr = 0;
+
+  for (int64_t i = it->i; i < count; i++) {
+    int64_t data_start = i * arena->config.item_size;
+    next_ptr = arena->data + data_start;
+    if (next_ptr == it->ptr) continue;
+
+    bool ok = true;
+
+    for (int64_t j = 0; j < arena->freed_memory.length; j++) {
+      ArenaRef ref = arena->freed_memory.items[j];
+      if (ref.arena == 0 || ref.arena != arena) continue;
+
+      if (ref.data_start == data_start) {
+        ok = false;
+        break;
+      }
+    }
+
+    if (!ok) continue;
+
+
+
+    it->ptr = next_ptr;
+    it->i = i;
+    it->arena = arena;
+    return it->ptr;
+  }
+
+no_more:
+  it->ptr = 0;
+  it->i = 0;
+  it->arena = 0;
+
+  if (arena->next != 0) {
+    return arena_iter(arena->next, it);
+  }
+
+  return it->ptr;
+}
+int arena_iter_old(Arena* arena, void* user_ptr, ArenaIterFunction iter_function) {
   if (!arena) return 0;
   if (!arena->initialized) ARENA_WARNING_RETURN(0, stderr, "Arena not initialized.\n");
   if (arena->config.item_size <= 0 || arena->config.items_per_page <= 0) ARENA_WARNING_RETURN(0, stderr, "This arena cannot be iterated over.\n");
@@ -293,7 +364,7 @@ int arena_iter(Arena* arena, void* user_ptr, ArenaIterFunction iter_function) {
   }
 
   if (arena->next != 0) {
-    ok = arena_iter(arena->next, user_ptr, iter_function) || ok;
+    ok = arena_iter_old(arena->next, user_ptr, iter_function) || ok;
   }
 
   return ok;

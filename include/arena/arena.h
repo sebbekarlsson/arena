@@ -36,6 +36,11 @@ typedef struct ARENA_STRUCT {
 } Arena;
 
 
+typedef struct {
+  Arena* arena;
+  void* ptr;
+  int64_t i;
+} ArenaIterator;
 
 
 int arena_init(Arena* arena, ArenaConfig cfg);
@@ -50,6 +55,6 @@ int arena_destroy(Arena* arena);
 
 bool arena_is_broken(Arena arena);
 
-int arena_iter(Arena* arena, void* user_ptr, ArenaIterFunction iter_function);
+void* arena_iter(Arena* arena, ArenaIterator* it);
 
 #endif
