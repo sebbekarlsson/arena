@@ -36,6 +36,7 @@ typedef struct ARENA_STRUCT {
   volatile int64_t malloc_length;
   volatile int64_t free_length;
   volatile int64_t pages;
+  volatile int64_t total_count;
 
   int64_t page_size;
 

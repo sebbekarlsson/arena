@@ -34,6 +34,7 @@ int arena_init(Arena *arena, ArenaConfig cfg) {
   arena->last_free_ref = 0;
   arena->malloc_length = 0;
   arena->free_length = 0;
+  arena->total_count = 0;
 
   // cfg.page_size = OR(cfg.page_size, ARENA_PAGE_SIZE);
   //  cfg.page_size = ARENA_ALIGN_UP(cfg.page_size, cfg.alignment);
@@ -213,6 +214,7 @@ void *arena_malloc(Arena *arena, ArenaRef *user_ref) {
     if (ref != 0 && ref->ptr != 0 && ref->arena != 0) {
       *user_ref = *ref;
       user_ref->page = page;
+      arena->total_count++;
       return ref->ptr;
     }
 
@@ -267,6 +269,7 @@ int arena_clear(Arena *arena) {
 
   arena->malloc_length = 0;
   arena->free_length = 0;
+  arena->total_count = 0;
 
   arena->size = 0;
   arena->current = 0;
@@ -357,7 +360,7 @@ find_arena:
 int64_t arena_get_allocation_count(Arena arena) {
   if (!arena.initialized) return 0;
   if (arena.data == 0) return 0;
-  return arena.malloc_length;
+  return arena.total_count;
 }
 
 int arena_reset(Arena* arena) {
@@ -372,6 +375,7 @@ int arena_reset(Arena* arena) {
   arena->pages = 0;
   arena->broken = false;
   arena->size = 0;
+  arena->total_count = 0;
 
 
   if (arena->refs != 0) {

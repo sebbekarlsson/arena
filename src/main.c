@@ -49,6 +49,7 @@ int main(int argc, char* argv[]) {
   }
 
   printf("%ld\n", count);
+  printf("%ld\n", arena_get_allocation_count(arena));
 
   arena_destroy(&arena);
 
