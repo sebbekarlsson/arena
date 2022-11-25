@@ -177,6 +177,8 @@ void test_arena_randomly_reset(int64_t count, int64_t items_per_page) {
 
   }
 
+  ARENA_ASSERT(arena_get_allocation_count(arena) > 0);
+
   for (int64_t i = 0; i < people.length; i++) {
     Person* p = people.items[i];
     ARENA_ASSERT(p != 0);
@@ -191,6 +193,7 @@ void test_arena_randomly_reset(int64_t count, int64_t items_per_page) {
 
   ARENA_ASSERT(arena.pages == 0);
   ARENA_ASSERT(arena.data != 0);
+  ARENA_ASSERT(arena_get_allocation_count(arena) == 0);
 
   prev = 0;
   for (int64_t i = 0; i < nr_items; i++) {
