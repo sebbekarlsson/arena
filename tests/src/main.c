@@ -1,3 +1,4 @@
+#include "arena/config.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <arena_test/test.h>
@@ -7,6 +8,8 @@
 #include <assert.h>
 #include <string.h>
 #include <date/date.h>
+#include <stdlib.h>
+#include <time.h>
 
 
 typedef struct {
@@ -239,9 +242,38 @@ void test_arena_randomly_reset(int64_t count, int64_t items_per_page) {
   arena_Person_list_clear(&people);
 }
 
+void test_arena_defrag() {
+
+  int count = 1024;
+  int64_t items_per_page = 2;
+  Arena arena = {0};
+  arena_init(&arena, (ArenaConfig){ .item_size = sizeof(Person), .items_per_page = items_per_page, .free_function = (ArenaFreeFunction)person_free });
+  const int nr_items = count;
+
+
+
+  for (int i = 0; i < (count*4); i++) {
+    ArenaRef ref = {0};
+    Person* tmp = arena_malloc(&arena, &ref);
+    ARENA_ASSERT(tmp != 0);
+    tmp->name = strdup("hello\n");
+
+    float k = ((float)rand() / (float)RAND_MAX);
+    if (k > 0.6f) {
+      	arena_free(ref);
+    }
+
+    else if (i % 2 == 0) {
+            arena_defrag(&arena);
+    }
+  }
+
+  arena_destroy(&arena);
+}
 
 int main(int argc, char* argv[]) {
 
+  test_arena_defrag();
   test_arena_various_page_size(10, 16);
   test_arena_various_page_size(100, 16);
   test_arena_various_page_size(1000, 16);

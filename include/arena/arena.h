@@ -41,11 +41,13 @@ typedef struct ARENA_STRUCT {
   int64_t page_size;
 
   struct ARENA_STRUCT* next;
+  struct ARENA_STRUCT* prev;
 
   ArenaConfig config;
 
   bool initialized;
   bool broken;
+  bool is_root;
 } Arena;
 
 
@@ -73,6 +75,8 @@ int arena_iterate(Arena* arena, ArenaIterator* it);
 
 int64_t arena_get_allocation_count(Arena arena);
 
-int arena_reset(Arena* arena);
+int arena_reset(Arena *arena);
+
+int arena_defrag(Arena* arena);
 
 #endif

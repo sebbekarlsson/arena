@@ -21,8 +21,8 @@ target_compile_options(arena_static PUBLIC -fPIC)
 
 
 # Debug
-# target_compile_options(arena PUBLIC -fPIC -g -Wall)
-# target_compile_options(arena_static PUBLIC -fPIC -g -Wall)
+target_compile_options(arena PUBLIC -fPIC -g -Wall -pg)
+target_compile_options(arena_static PUBLIC -fPIC -g -Wall -pg)
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
