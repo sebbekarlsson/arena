@@ -432,6 +432,23 @@ bool arena_is_clean(Arena *arena) {
   return count >= arena->config.items_per_page;
 }
 
+static Arena *arena_get_root(Arena *arena) {
+  if (!arena) return 0;
+  if (arena->is_root) return arena;
+
+
+  if (!arena->prev) return 0;
+  Arena* left = arena->prev;
+
+  while (left != 0) {
+    if (left->is_root) return left;
+    left = left->prev;
+  }
+
+  if (left != 0 && left->is_root) return left;
+  return 0;
+}
+
 int arena_defrag(Arena *arena) {
   if (!arena)
     return 0;
@@ -455,6 +472,12 @@ int arena_defrag(Arena *arena) {
     next->prev = prev;
   }
 
+
+  Arena* root = arena_get_root(arena);
+
+  if (!root) ARENA_WARNING_RETURN(0, stderr, "Expected root.\n");
+  
+  root->pages = MAX(root->pages-1, 0);
 
   arena_reset(arena);
   arena_clear(arena);
