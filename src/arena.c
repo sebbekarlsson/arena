@@ -426,10 +426,10 @@ bool arena_is_clean(Arena *arena) {
   int64_t count = 0;
   for (int64_t i = 0; i < arena->config.items_per_page; i++) {
     ArenaRef *ref = &arena->refs[i];
-    count += (int)arena_ref_can_be_used(*ref);
+    count += (int)(arena_ref_can_be_used(*ref) || ref->ptr == 0);
   }
 
-  return count >= arena->config.items_per_page; 
+  return count >= arena->config.items_per_page;
 }
 
 int arena_defrag(Arena *arena) {
@@ -442,9 +442,10 @@ int arena_defrag(Arena *arena) {
   Arena* next = arena->next;
 
 
-  if (arena->is_root && next != 0) return arena_defrag(next);
-  if (!arena_is_clean(arena) && next) return arena_defrag(next);
+  if (!arena_is_clean(arena) && next != 0) return arena_defrag(next);
 
+
+  if (arena->is_root || !arena_is_clean(arena)) return 0;
 
   if (prev && prev->next == arena) {
     prev->next = next;
@@ -453,6 +454,7 @@ int arena_defrag(Arena *arena) {
   if (next && next->prev == arena) {
     next->prev = prev;
   }
+
 
   arena_reset(arena);
   arena_clear(arena);

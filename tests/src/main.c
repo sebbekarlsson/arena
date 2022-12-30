@@ -244,7 +244,7 @@ void test_arena_randomly_reset(int64_t count, int64_t items_per_page) {
 
 void test_arena_defrag() {
 
-  int count = 1024;
+  int count = 2024;
   int64_t items_per_page = 2;
   Arena arena = {0};
   arena_init(&arena, (ArenaConfig){ .item_size = sizeof(Person), .items_per_page = items_per_page, .free_function = (ArenaFreeFunction)person_free });
@@ -259,22 +259,22 @@ void test_arena_defrag() {
     tmp->name = strdup("hello\n");
 
     float k = ((float)rand() / (float)RAND_MAX);
-    if (k > 0.6f) {
+    if (k >= 0.7f) {
       	arena_free(ref);
     }
 
-    else if (i % 2 == 0) {
+    if (i % 2 == 0) {
             arena_defrag(&arena);
     }
   }
 
+  arena_defrag(&arena);
   arena_destroy(&arena);
 }
 
 int main(int argc, char* argv[]) {
 
   test_arena_defrag();
-  test_arena_various_page_size(10, 16);
   test_arena_various_page_size(100, 16);
   test_arena_various_page_size(1000, 16);
   test_arena_various_page_size(1000, 3);
