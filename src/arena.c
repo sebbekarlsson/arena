@@ -155,8 +155,13 @@ find_free_ref:
   if (arena->last_free_ref != 0 &&
       arena_ref_can_be_used(*arena->last_free_ref)) {
     ref = arena->last_free_ref;
-    if (arena->config.free_function && ref->ptr != 0) {
-      arena->config.free_function(ref->ptr);
+
+    if (ref->ptr != 0) {
+      if (arena->config.free_function != 0) {
+        arena->config.free_function(ref->ptr);
+      } else if (arena->config.free_function_with_user_ptr != 0) {
+        arena->config.free_function_with_user_ptr(ref->ptr, arena->config.user_ptr_free);
+      }
     }
     ref->in_use = true;
     arena->free_length = MAX(0, arena->free_length - 1);
@@ -172,6 +177,8 @@ find_free_ref:
 
       if (arena->config.free_function) {
 	arena->config.free_function(ref->ptr);
+      } else if (arena->config.free_function_with_user_ptr != 0) {
+        arena->config.free_function_with_user_ptr(ref->ptr, arena->config.user_ptr_free);
       }
 
       ref->in_use = true;
@@ -247,8 +254,10 @@ int arena_clear(Arena *arena) {
       if (ref->in_use || ref->ptr == 0)
 	continue;
 
-      if (arena->config.free_function) {
+      if (arena->config.free_function != 0) {
 	arena->config.free_function(ref->ptr);
+      } else if (arena->config.free_function_with_user_ptr != 0) {
+        arena->config.free_function_with_user_ptr(ref->ptr, arena->config.user_ptr_free);
       }
 
       ref->in_use = false;
@@ -394,7 +403,9 @@ int arena_reset(Arena *arena) {
       if (ref->arena != 0 && ref->ptr != 0 && ref->data_size > 0) {
 	if (arena->config.free_function) {
 	  arena->config.free_function(ref->ptr);
-	}
+	} else if (arena->config.free_function_with_user_ptr != 0) {
+          arena->config.free_function_with_user_ptr(ref->ptr, arena->config.user_ptr_free);
+        }
       }
 
       ref->in_use = false;

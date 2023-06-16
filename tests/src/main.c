@@ -22,7 +22,7 @@ ARENA_DEFINE_LIST(Person);
 ARENA_IMPLEMENT_LIST(Person);
 
 
-void person_free(Person* person) {
+static void person_free(Person* person) {
   assert(person != 0);
   assert(person->name != 0);
   free(person->name);
@@ -272,6 +272,78 @@ void test_arena_defrag() {
   arena_destroy(&arena);
 }
 
+static void custom_free_function_with_ptr(void *data, void *user_ptr) {
+  ARENA_ASSERT(data != 0);
+  ARENA_ASSERT(user_ptr != 0);
+
+  const char* value = (const char*)user_ptr;
+
+  ARENA_ASSERT(strcmp(value, "my_pointer") == 0);
+
+
+  Person* person = (Person*)data;
+  assert(person != 0);
+  assert(person->name != 0);
+  free(person->name);
+  person->name = 0;
+}
+
+void test_arena_custom_free_function_ptr(int64_t count, int64_t items_per_page) {
+
+
+  const char* myptr = "my_pointer";
+  
+  Arena arena = {0};
+  arena_init(&arena, (ArenaConfig){ .item_size = sizeof(Person), .items_per_page = items_per_page, .user_ptr_free = (void*)myptr, .free_function_with_user_ptr = (ArenaFreeFunctionWithUserPtr)custom_free_function_with_ptr });
+
+  const int nr_items = count;
+
+
+  PersonList people = {0};
+  arena_Person_list_init(&people);
+
+  Person* prev = 0;
+  for (int64_t i = 0; i < nr_items; i++) {
+    ArenaRef ref = {0};
+    Person* p = arena_malloc(&arena, &ref);
+    ARENA_ASSERT(p != 0);
+    ARENA_ASSERT(ref.data_size > 0);
+    ARENA_ASSERT(ref.arena != 0);
+
+    p->ref = ref;
+
+    if (prev != 0) {
+      ARENA_ASSERT(prev->name != 0);
+    }
+
+    p->age = i;
+    p->name = strdup("John");
+
+
+   arena_Person_list_push(&people, p);
+
+  }
+
+  ARENA_ASSERT(people.length == nr_items);
+
+
+  for (int64_t i = 0; i < people.length; i++) {
+    Person* p = people.items[i];
+    ARENA_ASSERT(p != 0);
+    ARENA_ASSERT(p->name != 0);
+    ARENA_ASSERT(strcmp(p->name, "John") == 0);
+    ARENA_ASSERT(p->ref.arena != 0);
+    arena_free(p->ref);
+    
+  }
+
+  arena_destroy(&arena);
+
+  ARENA_ASSERT(arena.next == 0);
+
+  arena_Person_list_clear(&people);
+}
+
 int main(int argc, char* argv[]) {
 
   test_arena_defrag();
@@ -282,6 +354,7 @@ int main(int argc, char* argv[]) {
   test_arena_various_page_size(10000, 500);
   test_arena_randomly_free(1000, 16);
   test_arena_randomly_reset(500, 16);
+  test_arena_custom_free_function_ptr(1000, 16);
  // test_arena_various_page_size(1000, 256);
   //test_arena_randomly_free(1000, 256);
 

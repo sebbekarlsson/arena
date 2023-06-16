@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 typedef void (*ArenaFreeFunction)(void* data);
+typedef void (*ArenaFreeFunctionWithUserPtr)(void* data, void* user_ptr);
 typedef void (*ArenaIterFunction)(void* user_ptr, void* data_ptr);
 
 typedef struct {
@@ -11,6 +12,8 @@ typedef struct {
 //  int64_t page_size;
   int64_t alignment;
   ArenaFreeFunction free_function;
+  ArenaFreeFunctionWithUserPtr free_function_with_user_ptr;
+  void* user_ptr_free;
 
 } ArenaConfig;
 
