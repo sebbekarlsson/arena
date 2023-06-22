@@ -242,6 +242,17 @@ void *arena_malloc(Arena *arena, ArenaRef *user_ref) {
   ARENA_WARNING_RETURN(0, stderr, "Failed to allocate memory.\n");
 }
 
+int arena_unuse_all(Arena *arena) {
+  if (!arena || arena->initialized == false || arena->refs == 0) return 0;
+  
+  for (int64_t i = 0; i < arena->config.items_per_page; i++) {
+    ArenaRef* ref = &arena->refs[i];
+    arena_free(*ref);
+  }
+
+  return 1;
+}
+
 int arena_clear(Arena *arena) {
   if (!arena)
     return 0;

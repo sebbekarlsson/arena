@@ -77,6 +77,8 @@ int64_t arena_get_allocation_count(Arena arena);
 
 int arena_reset(Arena *arena);
 
-int arena_defrag(Arena* arena);
+int arena_defrag(Arena *arena);
+
+int arena_unuse_all(Arena* arena);
 
 #endif
